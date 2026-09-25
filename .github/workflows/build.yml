@@ -13,12 +13,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. استخراج كافة ملفات المشروع ونقلها للرئيسية
-      - name: Extract Project & Prepare Root
+      # 1. تهيئة ملفات المشروع وإصلاح إعدادات Babel و package.json تلقائياً
+      - name: Prepare Project & Fix Configs
         run: |
           cat << 'EOF' > prepare.py
-          import zipfile, glob, os, shutil
+          import zipfile, glob, os, shutil, json
 
+          # فك الضغط ونقل الملفات للرئيسية
           zips = glob.glob("*.zip")
           if zips:
               print(f"Unzipping {zips[0]}...")
@@ -44,18 +45,72 @@ jobs:
 
               shutil.rmtree("temp_ext", ignore_errors=True)
 
+          # ضبط أمر البناء داخل package.json
+          if os.path.exists("package.json"):
+              try:
+                  with open("package.json", "r", encoding="utf-8") as f:
+                      data = json.load(f)
+                  
+                  deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+                  scripts = data.get("scripts", {})
+                  
+                  if "expo" in deps or "expo-router" in deps:
+                      scripts["build"] = "expo export -p web"
+                  elif "vite" in deps or os.path.exists("vite.config.ts") or os.path.exists("vite.config.js"):
+                      scripts["build"] = "vite build"
+                  else:
+                      if "build" not in scripts:
+                          scripts["build"] = "vite build"
+                          
+                  data["scripts"] = scripts
+                  
+                  with open("package.json", "w", encoding="utf-8") as f:
+                      json.dump(data, f, indent=2)
+                      
+                  print("Updated package.json scripts successfully.")
+              except Exception as e:
+                  print("Error updating package.json:", e)
+
+          # إصلاح ملف babel لتفادي خطأ react-native-worklets
+          for b_file in ["babel.config.js", "babel.config.json", ".babelrc"]:
+              if os.path.exists(b_file):
+                  try:
+                      with open(b_file, "r", encoding="utf-8") as f:
+                          content = f.read()
+                      if "react-native-worklets/plugin" in content:
+                          content = content.replace("'react-native-worklets/plugin'", "'react-native-reanimated/plugin'")
+                          content = content.replace('"react-native-worklets/plugin"', '"react-native-reanimated/plugin"')
+                          with open(b_file, "w", encoding="utf-8") as f:
+                              f.write(content)
+                          print(f"Fixed {b_file}")
+                  except Exception as e:
+                      print(f"Error updating {b_file}:", e)
+
+          # التثبت من وجود index.html للمشاريع العادية
           if not os.path.exists("index.html"):
-              html_files = [h for h in glob.glob("**/index.html", recursive=True) if "node_modules" not in h and "dist" not in h]
-              if html_files:
-                  shutil.copy2(html_files[0], "index.html")
-              else:
-                  candidates = ["src/main.tsx", "src/main.jsx", "src/main.js", "src/index.tsx", "src/App.tsx", "index.js", "App.js"]
-                  entry = "src/main.tsx"
+              is_expo = False
+              if os.path.exists("package.json"):
+                  with open("package.json", "r", encoding="utf-8") as f:
+                      data = json.load(f)
+                      deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+                      if "expo" in deps or "expo-router" in deps:
+                          is_expo = True
+                          
+              if not is_expo:
+                  candidates = [
+                      "src/main.tsx", "src/main.jsx", "src/main.js", "src/main.ts",
+                      "src/App.tsx", "src/App.jsx", "src/App.js", "src/App.ts",
+                      "src/index.tsx", "src/index.jsx", "src/index.js", "src/index.ts",
+                      "App.tsx", "App.jsx", "App.js", "index.js"
+                  ]
+                  entry = None
                   for c in candidates:
                       if os.path.exists(c):
                           entry = c
                           break
-                  
+                  if not entry:
+                      entry = "src/App.tsx"
+                      
                   html_content = f"""<!DOCTYPE html>
           <html lang="en">
             <head>
@@ -68,10 +123,8 @@ jobs:
               <script type="module" src="/{entry}"></script>
             </body>
           </html>"""
-                  with open("index.html", "w") as f:
+                  with open("index.html", "w", encoding="utf-8") as f:
                       f.write(html_content)
-
-          print("Project prepared successfully.")
           EOF
           python3 prepare.py
 
@@ -80,29 +133,26 @@ jobs:
         with:
           node-version: 20
 
-      # 2. حل جذري لتثبيت الحزم وتجاوز تعارضات Expo/React-Native
+      # 2. تثبيت الحزم والمكتبات المساعدة للويب و Expo
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps --force
-          npm install -D vite @vitejs/plugin-react @expo/cli --legacy-peer-deps --force
+          npm install -D vite @vitejs/plugin-react @expo/cli react-native-web react-dom @expo/metro-runtime react-native-worklets react-native-worklets-core --legacy-peer-deps --force
 
-      # 3. بناء الويب
+      # 3. تنفيذ أمر البناء المصمّم تلقائياً
       - name: Build Web Application
         run: |
-          if grep -q '"expo"' package.json 2>/dev/null; then
-            npx expo export -p web || npx vite build || npm run build
-          else
-            npx vite build || npm run build
-          fi
+          npm run build || npx expo export -p web || npx vite build
 
           if [ ! -d "dist" ]; then
+            if [ -d "dist-web" ]; then cp -r dist-web dist; fi
             if [ -d "web-build" ]; then cp -r web-build dist; fi
             if [ -d "build" ]; then cp -r build dist; fi
             if [ -d "public" ] && [ ! -d "dist" ]; then cp -r public dist; fi
           fi
 
-      # 4. إعداد وبناء تطبيق الأندرويد
+      # 4. تحويل تطبيق الويب إلى APK عبر Capacitor
       - name: Setup Capacitor for Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
