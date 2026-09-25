@@ -13,63 +13,102 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # فك ضغط مشروع Zip واستخراج الملفات للرئيسية بدقة عبر Python
-      - name: Extract Project Files
+      # استخراج وتجهيز جميع ملفات المشروع وإنشاء index.html تلقائياً إن كان مفقوداً
+      - name: Extract Project & Fix Entry Files
         run: |
-          python3 -c '
-          import zipfile, glob, os, shutil
+          cat << 'EOF' > prepare.py
+          import zipfile, glob, os, shutil, json
+
+          # 1. فك الضغط ونقل جميع الملفات من المجلدات الفرعية إلى الرئيسية
           zips = glob.glob("*.zip")
           if zips:
               print(f"Unzipping {zips[0]}...")
               with zipfile.ZipFile(zips[0], "r") as z:
                   z.extractall("temp_ext")
-              pkg = None
+
+              pkg_path = None
               for r, d, files in os.walk("temp_ext"):
                   if "package.json" in files:
-                      pkg = os.path.join(r, "package.json")
+                      pkg_path = os.path.join(r, "package.json")
                       break
-              if pkg:
-                  src = os.path.dirname(pkg)
-                  print(f"Found package.json in {src}, moving files to root...")
-                  for item in os.listdir(src):
-                      s = os.path.join(src, item)
-                      d = os.path.join(".", item)
-                      if os.path.isdir(s):
-                          shutil.copytree(s, d, dirs_exist_ok=True)
-                      else:
-                          shutil.copy2(s, d)
+
+              if pkg_path:
+                  src_dir = os.path.dirname(pkg_path)
+                  print(f"Found project root at {src_dir}, copying all files...")
+                  for root, dirs, files in os.walk(src_dir):
+                      rel = os.path.relpath(root, src_dir)
+                      target = "." if rel == "." else os.path.join(".", rel)
+                      os.makedirs(target, exist_ok=True)
+                      for f in files:
+                          sf = os.path.join(root, f)
+                          df = os.path.join(target, f)
+                          shutil.copy2(sf, df)
+
               shutil.rmtree("temp_ext", ignore_errors=True)
-          '
+
+          # 2. التأكد من وجود index.html أو إنشائه
+          if not os.path.exists("index.html"):
+              html_files = [h for h in glob.glob("**/index.html", recursive=True) if "node_modules" not in h and "dist" not in h]
+              if html_files:
+                  print(f"Found index.html at {html_files[0]}, moving to root...")
+                  shutil.copy2(html_files[0], "index.html")
+              else:
+                  print("Creating root index.html automatically...")
+                  candidates = ["src/main.tsx", "src/main.jsx", "src/main.js", "src/main.ts", "src/index.tsx", "src/index.jsx", "src/index.js", "src/App.tsx", "src/App.jsx", "index.js", "App.js"]
+                  entry = "src/main.tsx"
+                  for c in candidates:
+                      if os.path.exists(c):
+                          entry = c
+                          break
+                  
+                  html_content = f"""<!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>LinguaMaster</title>
+            </head>
+            <body>
+              <div id="root"></div>
+              <script type="module" src="/{entry}"></script>
+            </body>
+          </html>"""
+                  with open("index.html", "w") as f:
+                      f.write(html_content)
+
+          print("Project preparation completed successfully.")
+          EOF
+          python3 prepare.py
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # تثبيت الحزم الأساسية مع إضافة Vite صراحة لتجنب خطأ vite not found
-      - name: Install dependencies & Vite
+      - name: Install dependencies
         run: |
-          npm install
-          npm install -D vite @vitejs/plugin-react
+          npm install --legacy-peer-deps || npm install --force
+          npm install -D vite @vitejs/plugin-react @expo/cli
 
-      - name: Fix Package Scripts & Build Web App
+      - name: Build Web Application
         run: |
-          node -e '
-            const fs = require("fs");
-            if (fs.existsSync("package.json")) {
-              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-              pkg.scripts = pkg.scripts || {};
-              if (!pkg.scripts.build) {
-                pkg.scripts.build = "vite build";
-                fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
-              }
-            }
-          '
-          npx vite build || npm run build
+          if grep -q '"expo"' package.json 2>/dev/null; then
+            echo "Expo Project Detected..."
+            npx expo export --platform web || npx vite build || npm run build
+          else
+            echo "Standard Web Project Detected..."
+            npx vite build || npm run build
+          fi
+
+          if [ ! -d "dist" ] && [ -d "web-build" ]; then
+            cp -r web-build dist
+          elif [ ! -d "dist" ] && [ -d "build" ]; then
+            cp -r build dist
+          fi
 
       - name: Setup Capacitor for Android
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
           if [ ! -d "android" ]; then
             npx cap init "إتقان اللغات" "com.gamesta.linguamaster" --web-dir "dist"
             npx cap add android
@@ -116,4 +155,5 @@ jobs:
         with:
           name: LinguaMaster-Online-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          
+
+        
