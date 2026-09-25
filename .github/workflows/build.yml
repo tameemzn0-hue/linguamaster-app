@@ -13,23 +13,246 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. تهيئة المجلد وإنشاء package.json تلقائياً إن لم يوجد
-      - name: Prepare Project Structure
+      # 1. تهيئة المجلد وتأكيد وجود dist/index.html بشكل مضمون 100%
+      - name: Prepare Game Dist Directory
         run: |
-          mkdir -p dist
-          if [ -f "index.html" ]; then
-            cp index.html dist/
-          fi
+          cat << 'EOF' > prepare_game.py
+          import os, glob, shutil, zipfile
 
-          cat << 'EOF' > package.json
-          {
-            "name": "mini-militia-clone",
-            "version": "1.0.0",
-            "scripts": {
-              "build": "echo 'Web ready'"
-            }
-          }
+          os.makedirs("dist", exist_ok=True)
+
+          # فك أي ملفات zip إن وجدت
+          zips = glob.glob("*.zip")
+          if zips:
+              print(f"Unzipping {zips[0]}...")
+              with zipfile.ZipFile(zips[0], "r") as z:
+                  z.extractall("temp_ext")
+              for r, d, files in os.walk("temp_ext"):
+                  for f in files:
+                      sf = os.path.join(r, f)
+                      df = os.path.join(".", f)
+                      if not os.path.exists(df):
+                          try:
+                              shutil.copy2(sf, df)
+                          except:
+                              pass
+              shutil.rmtree("temp_ext", ignore_errors=True)
+
+          # البحث عن index.html في كل المجلدات
+          found_html = None
+          for root, dirs, files in os.walk("."):
+              if "dist" in root or "node_modules" in root or "android" in root:
+                  continue
+              if "index.html" in files:
+                  found_html = os.path.join(root, "index.html")
+                  break
+
+          if found_html:
+              print(f"Found index.html at {found_html}, copying to dist/index.html...")
+              shutil.copy2(found_html, "dist/index.html")
+          else:
+              print("index.html not found! Generating Mini Militia game code directly in dist/index.html...")
+              game_html = """<!DOCTYPE html>
+          <html lang="ar">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+            <title>Mini Militia - Doodle Strike</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
+              body, html { width: 100vw; height: 100vh; overflow: hidden; background: #11141a; font-family: sans-serif; }
+              canvas { display: block; width: 100vw; height: 100vh; }
+            </style>
+          </head>
+          <body>
+            <canvas id="gameCanvas"></canvas>
+            <script>
+              async function lockLandscape() {
+                try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (e) {}
+              }
+              window.addEventListener('load', lockLandscape);
+
+              const canvas = document.getElementById('gameCanvas');
+              const ctx = canvas.getContext('2d');
+              function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+              window.addEventListener('resize', resize);
+              resize();
+
+              const player = { x: 120, y: canvas.height / 2, vx: 0, vy: 0, radius: 18, speed: 4.5, health: 100, maxHealth: 100, fuel: 100, maxFuel: 100, aimAngle: 0, isGrounded: false, kills: 0, color: '#2ecc71' };
+              const particles = [];
+              let platforms = [];
+              function initMap() {
+                const h = canvas.height, w = canvas.width;
+                platforms = [
+                  { x: 0, y: h - 35, w: w, h: 35 },
+                  { x: w * 0.15, y: h - 140, w: w * 0.25, h: 20 },
+                  { x: w * 0.6, y: h - 140, w: w * 0.25, h: 20 },
+                  { x: w * 0.38, y: h - 250, w: w * 0.24, h: 20 }
+                ];
+              }
+              initMap();
+              window.addEventListener('resize', initMap);
+
+              const bullets = [];
+              const bots = [];
+
+              function spawnBot() {
+                if (bots.length < 3) {
+                  bots.push({ id: Math.random(), x: Math.random() * (canvas.width - 200) + 100, y: 50, vx: 0, vy: 0, radius: 18, health: 60, maxHealth: 60, aimAngle: 0, color: '#e74c3c', lastShoot: 0 });
+                }
+              }
+              setInterval(spawnBot, 3000);
+
+              const leftJoy = { active: false, id: null, startX: 0, startY: 0, currX: 0, currY: 0, dx: 0, dy: 0 };
+              const rightJoy = { active: false, id: null, startX: 0, startY: 0, currX: 0, currY: 0, dx: 0, dy: 0 };
+
+              window.addEventListener('touchstart', (e) => {
+                for (let touch of e.changedTouches) {
+                  if (touch.clientX < canvas.width / 2 && !leftJoy.active) {
+                    leftJoy.active = true; leftJoy.id = touch.identifier; leftJoy.startX = leftJoy.currX = touch.clientX; leftJoy.startY = leftJoy.currY = touch.clientY;
+                  } else if (touch.clientX >= canvas.width / 2 && !rightJoy.active) {
+                    rightJoy.active = true; rightJoy.id = touch.identifier; rightJoy.startX = rightJoy.currX = touch.clientX; rightJoy.startY = rightJoy.currY = touch.clientY;
+                  }
+                }
+              });
+
+              window.addEventListener('touchmove', (e) => {
+                for (let touch of e.changedTouches) {
+                  if (leftJoy.active && touch.identifier === leftJoy.id) {
+                    leftJoy.currX = touch.clientX; leftJoy.currY = touch.clientY;
+                    let dist = Math.hypot(leftJoy.currX - leftJoy.startX, leftJoy.currY - leftJoy.startY);
+                    let angle = Math.atan2(leftJoy.currY - leftJoy.startY, leftJoy.currX - leftJoy.startX);
+                    let clampedDist = Math.min(dist, 50);
+                    leftJoy.dx = (Math.cos(angle) * clampedDist) / 50; leftJoy.dy = (Math.sin(angle) * clampedDist) / 50;
+                  }
+                  if (rightJoy.active && touch.identifier === rightJoy.id) {
+                    rightJoy.currX = touch.clientX; rightJoy.currY = touch.clientY;
+                    let dist = Math.hypot(rightJoy.currX - rightJoy.startX, rightJoy.currY - rightJoy.startY);
+                    let angle = Math.atan2(rightJoy.currY - rightJoy.startX, rightJoy.currX - rightJoy.startX);
+                    let clampedDist = Math.min(dist, 50);
+                    rightJoy.dx = (Math.cos(angle) * clampedDist) / 50; rightJoy.dy = (Math.sin(angle) * clampedDist) / 50;
+                  }
+                }
+              });
+
+              function releaseTouch(id) {
+                if (leftJoy.active && id === leftJoy.id) { leftJoy.active = false; leftJoy.dx = 0; leftJoy.dy = 0; }
+                if (rightJoy.active && id === rightJoy.id) { rightJoy.active = false; rightJoy.dx = 0; rightJoy.dy = 0; }
+              }
+              window.addEventListener('touchend', (e) => { for (let touch of e.changedTouches) releaseTouch(touch.identifier); });
+              window.addEventListener('touchcancel', (e) => { for (let touch of e.changedTouches) releaseTouch(touch.identifier); });
+
+              let lastPlayerShoot = 0;
+              function shoot(owner, angle) {
+                const speed = 14;
+                bullets.push({ x: owner.x + Math.cos(angle) * 24, y: owner.y + Math.sin(angle) * 24, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, isPlayer: owner === player, life: 70 });
+              }
+
+              function update() {
+                if (leftJoy.active) {
+                  player.vx = leftJoy.dx * player.speed;
+                  if (leftJoy.dy < -0.2 && player.fuel > 0) {
+                    player.vy -= 0.65; player.fuel = Math.max(0, player.fuel - 0.75);
+                    particles.push({ x: player.x - Math.cos(player.aimAngle) * 10, y: player.y + 12, vx: (Math.random() - 0.5) * 2, vy: Math.random() * 3 + 2, radius: Math.random() * 5 + 3, alpha: 1 });
+                  }
+                } else { player.vx *= 0.82; }
+
+                player.vy += 0.38; player.x += player.vx; player.y += player.vy;
+                if (player.isGrounded) player.fuel = Math.min(player.maxFuel, player.fuel + 1.1);
+
+                if (rightJoy.active && (Math.abs(rightJoy.dx) > 0.3 || Math.abs(rightJoy.dy) > 0.3)) {
+                  player.aimAngle = Math.atan2(rightJoy.dy, rightJoy.dx);
+                  const now = Date.now();
+                  if (now - lastPlayerShoot > 130) { shoot(player, player.aimAngle); lastPlayerShoot = now; }
+                }
+
+                player.isGrounded = false;
+                for (let p of platforms) {
+                  if (player.x > p.x - player.radius && player.x < p.x + p.w + player.radius && player.y + player.radius >= p.y && player.y - player.radius < p.y + p.h) {
+                    if (player.vy > 0 && player.y < p.y + 16) { player.y = p.y - player.radius; player.vy = 0; player.isGrounded = true; }
+                  }
+                }
+                player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+
+                const now = Date.now();
+                for (let bot of bots) {
+                  let dx = player.x - bot.x, dy = player.y - bot.y, dist = Math.hypot(dx, dy);
+                  bot.aimAngle = Math.atan2(dy, dx);
+                  if (dist > 150) { bot.vx = (dx / dist) * 2; if (dy < -50) bot.vy -= 0.5; } else { bot.vx *= 0.9; }
+                  bot.vy += 0.35; bot.x += bot.vx; bot.y += bot.vy;
+                  for (let p of platforms) {
+                    if (bot.x > p.x - bot.radius && bot.x < p.x + p.w + bot.radius && bot.y + bot.radius >= p.y && bot.y - bot.radius < p.y + p.h) {
+                      if (bot.vy > 0 && bot.y < p.y + 16) { bot.y = p.y - bot.radius; bot.vy = 0; }
+                    }
+                  }
+                  if (dist < 400 && now - bot.lastShoot > 800) { shoot(bot, bot.aimAngle); bot.lastShoot = now; }
+                }
+
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                  let b = bullets[i]; b.x += b.vx; b.y += b.vy; b.life--;
+                  if (b.isPlayer) {
+                    for (let j = bots.length - 1; j >= 0; j--) {
+                      let bot = bots[j];
+                      if (Math.hypot(b.x - bot.x, b.y - bot.y) < bot.radius + 4) {
+                        bot.health -= 20; b.life = 0;
+                        if (bot.health <= 0) { bots.splice(j, 1); player.kills++; }
+                      }
+                    }
+                  } else {
+                    if (Math.hypot(b.x - player.x, b.y - player.y) < player.radius + 4) {
+                      player.health = Math.max(0, player.health - 10); b.life = 0;
+                      if (player.health <= 0) { player.x = 100; player.y = 100; player.health = 100; player.fuel = 100; }
+                    }
+                  }
+                  if (b.life <= 0) bullets.splice(i, 1);
+                }
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                  let p = particles[i]; p.x += p.vx; p.y += p.vy; p.alpha -= 0.03;
+                  if (p.alpha <= 0) particles.splice(i, 1);
+                }
+              }
+
+              function render() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (let p of platforms) { ctx.fillStyle = '#2c3e50'; ctx.fillRect(p.x, p.y, p.w, p.h); ctx.strokeStyle = '#34495e'; ctx.lineWidth = 3; ctx.strokeRect(p.x, p.y, p.w, p.h); }
+                for (let p of particles) { ctx.fillStyle = `rgba(236, 240, 241, ${p.alpha})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill(); }
+                for (let b of bullets) { ctx.fillStyle = b.isPlayer ? '#f1c40f' : '#e74c3c'; ctx.beginPath(); ctx.arc(b.x, b.y, 4.5, 0, Math.PI * 2); ctx.fill(); }
+                for (let bot of bots) {
+                  ctx.fillStyle = bot.color; ctx.beginPath(); ctx.arc(bot.x, bot.y, bot.radius, 0, Math.PI * 2); ctx.fill();
+                  ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(bot.x, bot.y); ctx.lineTo(bot.x + Math.cos(bot.aimAngle) * 26, bot.y + Math.sin(bot.aimAngle) * 26); ctx.stroke();
+                  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bot.x - 20, bot.y - 28, 40, 5); ctx.fillStyle = '#e74c3c'; ctx.fillRect(bot.x - 20, bot.y - 28, (bot.health / bot.maxHealth) * 40, 5);
+                }
+                ctx.fillStyle = player.color; ctx.beginPath(); ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = '#f39c12'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(player.aimAngle) * 28, player.y + Math.sin(player.aimAngle) * 28); ctx.stroke();
+
+                drawJoystick(leftJoy, '#3498db'); drawJoystick(rightJoy, '#e74c3c');
+
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(20, 20, 160, 14); ctx.fillStyle = '#2ecc71'; ctx.fillRect(20, 20, (player.health / player.maxHealth) * 160, 14);
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(20, 40, 160, 10); ctx.fillStyle = '#3498db'; ctx.fillRect(20, 40, (player.fuel / player.maxFuel) * 160, 10);
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.fillText(`Kills: ${player.kills}`, 20, 75);
+              }
+
+              function drawJoystick(joy, color) {
+                if (!joy.active) return;
+                ctx.beginPath(); ctx.arc(joy.startX, joy.startY, 50, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 3; ctx.stroke();
+                ctx.beginPath(); ctx.arc(joy.currX, joy.currY, 22, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+              }
+
+              function loop() { update(); render(); requestAnimationFrame(loop); }
+              loop();
+            </script>
+          </body>
+          </html>"""
+              with open("dist/index.html", "w", encoding="utf-8") as f:
+                  f.write(game_html)
+
+          if not os.path.exists("package.json"):
+              with open("package.json", "w", encoding="utf-8") as f:
+                  f.write('{"name": "mini-militia-clone","version": "1.0.0","scripts": {"build": "echo web ready"}}')
+
           EOF
+          python3 prepare_game.py
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
