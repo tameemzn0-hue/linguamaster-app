@@ -46,10 +46,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm install
+      # تثبيت الحزم الأساسية مع إضافة Vite صراحة لتجنب خطأ vite not found
+      - name: Install dependencies & Vite
+        run: |
+          npm install
+          npm install -D vite @vitejs/plugin-react
 
-      # التأكد من وجود أمر بناء المشروع وإصلاحه تلقائياً قبل التشغيل
       - name: Fix Package Scripts & Build Web App
         run: |
           node -e '
@@ -63,7 +65,7 @@ jobs:
               }
             }
           '
-          npm run build
+          npx vite build || npm run build
 
       - name: Setup Capacitor for Android
         run: |
