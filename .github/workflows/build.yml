@@ -13,19 +13,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # فك الضغط التلقائي الذكي للبحث عن الملفات أينما كانت
-      - name: Unzip project files smartly
+      # فك ضغط مشروع Zip واستخراج الملفات للرئيسية بدقة عبر Python
+      - name: Extract Project Files
         run: |
-          mkdir -p extracted
-          unzip -o *.zip -d extracted/
-          
-          PKG_PATH=$(find extracted -name "package.json" | head -n 1)
-          if [ -n "$PKG_PATH" ]; then
-            PKG_DIR=$(dirname "$PKG_PATH")
-            cp -r $PKG_DIR/* . 2>/dev/null || true
-            cp -r $PKG_DIR/.* . 2>/dev/null || true
-          fi
-          rm -rf extracted
+          python3 -c '
+          import zipfile, glob, os, shutil
+          zips = glob.glob("*.zip")
+          if zips:
+              print(f"Unzipping {zips[0]}...")
+              with zipfile.ZipFile(zips[0], "r") as z:
+                  z.extractall("temp_ext")
+              pkg = None
+              for r, d, files in os.walk("temp_ext"):
+                  if "package.json" in files:
+                      pkg = os.path.join(r, "package.json")
+                      break
+              if pkg:
+                  src = os.path.dirname(pkg)
+                  print(f"Found package.json in {src}, moving files to root...")
+                  for item in os.listdir(src):
+                      s = os.path.join(src, item)
+                      d = os.path.join(".", item)
+                      if os.path.isdir(s):
+                          shutil.copytree(s, d, dirs_exist_ok=True)
+                      else:
+                          shutil.copy2(s, d)
+              shutil.rmtree("temp_ext", ignore_errors=True)
+          '
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,14 +49,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # بناء التطبيق مباشرة عبر Vite مع تجاوز أي نقص في package.json
-      - name: Build Web Application
+      # التأكد من وجود أمر بناء المشروع وإصلاحه تلقائياً قبل التشغيل
+      - name: Fix Package Scripts & Build Web App
         run: |
-          if npm run | grep -q " build"; then
-            npm run build
-          else
-            npx vite build || npx tsc && npx vite build
-          fi
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("package.json")) {
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              pkg.scripts = pkg.scripts || {};
+              if (!pkg.scripts.build) {
+                pkg.scripts.build = "vite build";
+                fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+              }
+            }
+          '
+          npm run build
 
       - name: Setup Capacitor for Android
         run: |
