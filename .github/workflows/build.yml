@@ -13,13 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # استخراج وتجهيز جميع ملفات المشروع وإنشاء index.html تلقائياً إن كان مفقوداً
-      - name: Extract Project & Fix Entry Files
+      # 1. استخراج كافة ملفات المشروع ونقلها للرئيسية
+      - name: Extract Project & Prepare Root
         run: |
           cat << 'EOF' > prepare.py
-          import zipfile, glob, os, shutil, json
+          import zipfile, glob, os, shutil
 
-          # 1. فك الضغط ونقل جميع الملفات من المجلدات الفرعية إلى الرئيسية
           zips = glob.glob("*.zip")
           if zips:
               print(f"Unzipping {zips[0]}...")
@@ -34,7 +33,6 @@ jobs:
 
               if pkg_path:
                   src_dir = os.path.dirname(pkg_path)
-                  print(f"Found project root at {src_dir}, copying all files...")
                   for root, dirs, files in os.walk(src_dir):
                       rel = os.path.relpath(root, src_dir)
                       target = "." if rel == "." else os.path.join(".", rel)
@@ -46,15 +44,12 @@ jobs:
 
               shutil.rmtree("temp_ext", ignore_errors=True)
 
-          # 2. التأكد من وجود index.html أو إنشائه
           if not os.path.exists("index.html"):
               html_files = [h for h in glob.glob("**/index.html", recursive=True) if "node_modules" not in h and "dist" not in h]
               if html_files:
-                  print(f"Found index.html at {html_files[0]}, moving to root...")
                   shutil.copy2(html_files[0], "index.html")
               else:
-                  print("Creating root index.html automatically...")
-                  candidates = ["src/main.tsx", "src/main.jsx", "src/main.js", "src/main.ts", "src/index.tsx", "src/index.jsx", "src/index.js", "src/App.tsx", "src/App.jsx", "index.js", "App.js"]
+                  candidates = ["src/main.tsx", "src/main.jsx", "src/main.js", "src/index.tsx", "src/App.tsx", "index.js", "App.js"]
                   entry = "src/main.tsx"
                   for c in candidates:
                       if os.path.exists(c):
@@ -76,7 +71,7 @@ jobs:
                   with open("index.html", "w") as f:
                       f.write(html_content)
 
-          print("Project preparation completed successfully.")
+          print("Project prepared successfully.")
           EOF
           python3 prepare.py
 
@@ -85,30 +80,32 @@ jobs:
         with:
           node-version: 20
 
+      # 2. حل جذري لتثبيت الحزم وتجاوز تعارضات Expo/React-Native
       - name: Install dependencies
         run: |
-          npm install --legacy-peer-deps || npm install --force
-          npm install -D vite @vitejs/plugin-react @expo/cli
+          npm config set legacy-peer-deps true
+          npm install --legacy-peer-deps --force
+          npm install -D vite @vitejs/plugin-react @expo/cli --legacy-peer-deps --force
 
+      # 3. بناء الويب
       - name: Build Web Application
         run: |
           if grep -q '"expo"' package.json 2>/dev/null; then
-            echo "Expo Project Detected..."
-            npx expo export --platform web || npx vite build || npm run build
+            npx expo export -p web || npx vite build || npm run build
           else
-            echo "Standard Web Project Detected..."
             npx vite build || npm run build
           fi
 
-          if [ ! -d "dist" ] && [ -d "web-build" ]; then
-            cp -r web-build dist
-          elif [ ! -d "dist" ] && [ -d "build" ]; then
-            cp -r build dist
+          if [ ! -d "dist" ]; then
+            if [ -d "web-build" ]; then cp -r web-build dist; fi
+            if [ -d "build" ]; then cp -r build dist; fi
+            if [ -d "public" ] && [ ! -d "dist" ]; then cp -r public dist; fi
           fi
 
+      # 4. إعداد وبناء تطبيق الأندرويد
       - name: Setup Capacitor for Android
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
           if [ ! -d "android" ]; then
             npx cap init "إتقان اللغات" "com.gamesta.linguamaster" --web-dir "dist"
             npx cap add android
@@ -155,5 +152,4 @@ jobs:
         with:
           name: LinguaMaster-Online-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-
-        
+          
