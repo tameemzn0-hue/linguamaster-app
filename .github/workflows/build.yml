@@ -53,7 +53,7 @@ jobs:
           EOF
           python3 prepare.py
 
-      # إعادة كتابة babel.config.js بشكل نظيف بدون أخطاء محاذاة
+      # إعادة كتابة babel.config.js بشكل نظيف
       - name: Clean Babel Config
         run: |
           cat << 'EOF' > babel.config.js
@@ -70,11 +70,12 @@ jobs:
         with:
           node-version: 20
 
-      # 2. تثبيت الحزم المطلوبة
+      # 2. تثبيت الحزم المطلوبة وإضافة react-native-worklets المفقودة
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps --force
+          npm install react-native-worklets --legacy-peer-deps --force
 
       # 3. بناء تطبيق الويب ورصد الأخطاء
       - name: Build Web Application
