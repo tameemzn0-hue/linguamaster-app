@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. تهيئة الكود والمطابقة
+      # 1. تهيئة الكود وإصلاح babel.config.js بالكامل
       - name: Prepare Project & Fix Configs
         run: |
           cat << 'EOF' > prepare.py
@@ -44,7 +44,7 @@ jobs:
 
               shutil.rmtree("temp_ext", ignore_errors=True)
 
-          # ضبط .env افتراضي
+          # إنشاء ملف .env افتراضي
           env_content = """EXPO_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
           EXPO_PUBLIC_SUPABASE_ANON_KEY=placeholder
           VITE_SUPABASE_URL=https://placeholder.supabase.co
@@ -54,6 +54,16 @@ jobs:
               with open(".env", "w", encoding="utf-8") as f:
                   f.write(env_content)
 
+          # إعادة كتابة babel.config.js بشكل نظيف بدون الإضافات التالفة
+          babel_clean = """module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo'],
+  };
+};"""
+          with open("babel.config.js", "w", encoding="utf-8") as f:
+              f.write(babel_clean)
+
           EOF
           python3 prepare.py
 
@@ -62,15 +72,16 @@ jobs:
         with:
           node-version: 20
 
+      # 2. تثبيت الحزم المطلوبة لـ Expo
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps --force
 
-      # 2. بناء التطبيق للويب بأسلوب ثابت النسبي
+      # 3. بناء تطبيق الويب عبر Expo
       - name: Build Web Application
         run: |
-          npx expo export -p web || npm run build || npx vite build --base=./
+          npx expo export -p web
 
           if [ ! -d "dist" ]; then
             if [ -d "dist-web" ]; then cp -r dist-web dist; fi
@@ -78,7 +89,7 @@ jobs:
             if [ -d "build" ]; then cp -r build dist; fi
           fi
 
-          # حقن كود طباعة الأخطاء على شاشة الهاتف بدلاً من الشاشة البيضاء
+          # تصحيح مسارات index.html لتصبح نسبية ./ لتعمل داخل WebView
           if [ -f "dist/index.html" ]; then
             sed -i 's/src="\//src="\.\//g' dist/index.html
             sed -i 's/href="\//href="\.\//g' dist/index.html
@@ -87,7 +98,7 @@ jobs:
             sed -i "s|<head>|<head>${ERR_SCRIPT}|g" dist/index.html
           fi
 
-      # 3. تحويل الكود إلى أندرويد عبر Capacitor
+      # 4. تحويل الكود إلى أندرويد عبر Capacitor
       - name: Setup Capacitor for Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
