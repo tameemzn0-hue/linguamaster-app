@@ -1,4 +1,4 @@
-name: Build LinguaMaster Online APK
+name: Build Mini Militia APK
 
 on:
   push:
@@ -13,56 +13,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. تهيئة ملفات المشروع وتجهيز البيئة
-      - name: Prepare Project & Fix Configs
+      # 1. تهيئة المجلد وإنشاء package.json تلقائياً إن لم يوجد
+      - name: Prepare Project Structure
         run: |
-          cat << 'EOF' > prepare.py
-          import zipfile, glob, os, shutil, json
+          mkdir -p dist
+          if [ -f "index.html" ]; then
+            cp index.html dist/
+          fi
 
-          zips = glob.glob("*.zip")
-          if zips:
-              print(f"Unzipping {zips[0]}...")
-              with zipfile.ZipFile(zips[0], "r") as z:
-                  z.extractall("temp_ext")
-
-              pkg_path = None
-              for r, d, files in os.walk("temp_ext"):
-                  if "package.json" in files:
-                      pkg_path = os.path.join(r, "package.json")
-                      break
-
-              if pkg_path:
-                  src_dir = os.path.dirname(pkg_path)
-                  for root, dirs, files in os.walk(src_dir):
-                      rel = os.path.relpath(root, src_dir)
-                      target = "." if rel == "." else os.path.join(".", rel)
-                      os.makedirs(target, exist_ok=True)
-                      for f in files:
-                          sf = os.path.join(root, f)
-                          df = os.path.join(target, f)
-                          shutil.copy2(sf, df)
-
-              shutil.rmtree("temp_ext", ignore_errors=True)
-
-          # إنشاء ملف .env افتراضي
-          env_content = "EXPO_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co\nEXPO_PUBLIC_SUPABASE_ANON_KEY=placeholder\nVITE_SUPABASE_URL=https://placeholder.supabase.co\nVITE_SUPABASE_ANON_KEY=placeholder\n"
-          if not os.path.exists(".env"):
-              with open(".env", "w", encoding="utf-8") as f:
-                  f.write(env_content)
-
-          EOF
-          python3 prepare.py
-
-      # إعادة كتابة babel.config.js بشكل نظيف
-      - name: Clean Babel Config
-        run: |
-          cat << 'EOF' > babel.config.js
-          module.exports = function (api) {
-            api.cache(true);
-            return {
-              presets: ['babel-preset-expo'],
-            };
-          };
+          cat << 'EOF' > package.json
+          {
+            "name": "mini-militia-clone",
+            "version": "1.0.0",
+            "scripts": {
+              "build": "echo 'Web ready'"
+            }
+          }
           EOF
 
       - name: Setup Node.js
@@ -70,42 +36,25 @@ jobs:
         with:
           node-version: 20
 
-      # 2. تثبيت الحزم المطلوبة وإضافة react-native-worklets المفقودة
-      - name: Install dependencies
-        run: |
-          npm config set legacy-peer-deps true
-          npm install --legacy-peer-deps --force
-          npm install react-native-worklets --legacy-peer-deps --force
-
-      # 3. بناء تطبيق الويب ورصد الأخطاء
-      - name: Build Web Application
-        run: |
-          npx expo export -p web || npm run build || npx vite build --base=./
-
-          if [ ! -d "dist" ]; then
-            if [ -d "dist-web" ]; then cp -r dist-web dist; fi
-            if [ -d "web-build" ]; then cp -r web-build dist; fi
-            if [ -d "build" ]; then cp -r build dist; fi
-          fi
-
-          if [ -f "dist/index.html" ]; then
-            sed -i 's/src="\//src="\.\//g' dist/index.html
-            sed -i 's/href="\//href="\.\//g' dist/index.html
-            
-            ERR_SCRIPT='<script>window.onerror=function(m,u,l){document.body.innerHTML="<div style=\"color:red;padding:20px;font-size:16px;word-break:break-all;\"><h3>App Crash Error:</h3>"+m+"<br><br><b>File:</b> "+u+"<br><b>Line:</b> "+l+"</div>";};</script>'
-            sed -i "s|<head>|<head>${ERR_SCRIPT}|g" dist/index.html
-          fi
-
-      # 4. تحويل الكود إلى أندرويد عبر Capacitor
+      # 2. إعداد Capacitor وتفعيل الأندرويد
       - name: Setup Capacitor for Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
           if [ ! -d "android" ]; then
-            npx cap init "إتقان اللغات" "com.gamesta.linguamaster" --web-dir "dist"
+            npx cap init "Mini Militia" "com.gamesta.minimilitia" --web-dir "dist"
             npx cap add android
           fi
           npx cap sync android
 
+      # 3. إجبار الشاشة على الفتح بالعرض فقط (Force Landscape Orientation)
+      - name: Force Landscape Mode in Android Manifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's/android:name="\.MainActivity"/android:name="\.MainActivity" android:screenOrientation="sensorLandscape"/g' $MANIFEST
+          fi
+
+      # 4. حل تعارض مكتبات كوتلن المكررة
       - name: Fix Kotlin Duplicate Classes Conflict
         run: |
           if [ -f "android/build.gradle" ]; then
@@ -137,7 +86,7 @@ jobs:
           keytool -genkey -v -keystore ~/.android/debug.keystore \
             -storepass android -alias androiddebugkey -keypass android \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=LinguaMaster,OU=App,O=Gamesta,L=City,S=State,C=US"
+            -dname "CN=MiniMilitia,OU=Game,O=Gamesta,L=City,S=State,C=US"
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
@@ -150,6 +99,6 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaMaster-Online-APK
+          name: MiniMilitia-Landscape-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
