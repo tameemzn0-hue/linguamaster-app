@@ -1,0 +1,88 @@
+name: Build LinguaMaster Online APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Unzip project files
+        run: |
+          unzip -o *.zip -d extracted/
+          if [ -f extracted/package.json ]; then
+            cp -r extracted/* . 2>/dev/null || true
+            cp -r extracted/.* . 2>/dev/null || true
+          else
+            cp -r extracted/*/* . 2>/dev/null || true
+            cp -r extracted/*/.??* . 2>/dev/null || true
+          fi
+          rm -rf extracted
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Setup Capacitor for Android
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          if [ ! -d "android" ]; then
+            npx cap init "إتقان اللغات" "com.gamesta.linguamaster" --web-dir "dist"
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Auto Increment App Version
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i 's/versionCode [0-9]*/versionCode ${{ github.run_number }}/g' $GRADLE_FILE
+            sed -i 's/versionName "[^"]*"/versionName "1.0.${{ github.run_number }}"/g' $GRADLE_FILE
+          fi
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Fix Gradle Wrapper Version
+        run: |
+          cd android
+          gradle wrapper --gradle-version 8.2.1 --distribution-type bin
+
+      - name: Generate Fixed Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=LinguaMaster,OU=App,O=Gamesta,L=City,S=State,C=US"
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build Android APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaMaster-Online-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          
