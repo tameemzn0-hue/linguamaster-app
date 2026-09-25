@@ -176,10 +176,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Fix Gradle Wrapper Version
+      - name: Fix Gradle Wrapper Version (Update to 8.9)
         run: |
           cd android
-          gradle wrapper --gradle-version 8.2.1 --distribution-type bin
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
 
       - name: Generate Fixed Debug Keystore
         run: |
