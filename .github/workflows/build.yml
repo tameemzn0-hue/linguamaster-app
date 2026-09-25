@@ -13,13 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. تهيئة ملفات المشروع، إنشاء .env افتراضي، وإصلاح Configs
+      # 1. تهيئة الكود والمطابقة
       - name: Prepare Project & Fix Configs
         run: |
           cat << 'EOF' > prepare.py
           import zipfile, glob, os, shutil, json
 
-          # فك الضغط ونقل الملفات للرئيسية
           zips = glob.glob("*.zip")
           if zips:
               print(f"Unzipping {zips[0]}...")
@@ -45,7 +44,7 @@ jobs:
 
               shutil.rmtree("temp_ext", ignore_errors=True)
 
-          # إنشاء ملف .env افتراضي لمنع انهيار Supabase/React عند الإقلاع
+          # ضبط .env افتراضي
           env_content = """EXPO_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
           EXPO_PUBLIC_SUPABASE_ANON_KEY=placeholder
           VITE_SUPABASE_URL=https://placeholder.supabase.co
@@ -55,74 +54,6 @@ jobs:
               with open(".env", "w", encoding="utf-8") as f:
                   f.write(env_content)
 
-          # ضبط أمر البناء داخل package.json
-          if os.path.exists("package.json"):
-              try:
-                  with open("package.json", "r", encoding="utf-8") as f:
-                      data = json.load(f)
-                  
-                  deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-                  scripts = data.get("scripts", {})
-                  
-                  if "expo" in deps or "expo-router" in deps:
-                      scripts["build"] = "expo export -p web"
-                  elif "vite" in deps or os.path.exists("vite.config.ts") or os.path.exists("vite.config.js"):
-                      scripts["build"] = "vite build --base=./"
-                  else:
-                      if "build" not in scripts:
-                          scripts["build"] = "vite build --base=./"
-                          
-                  data["scripts"] = scripts
-                  
-                  with open("package.json", "w", encoding="utf-8") as f:
-                      json.dump(data, f, indent=2)
-              except Exception as e:
-                  print("Error updating package.json:", e)
-
-          # إصلاح ملف babel
-          for b_file in ["babel.config.js", "babel.config.json", ".babelrc"]:
-              if os.path.exists(b_file):
-                  try:
-                      with open(b_file, "r", encoding="utf-8") as f:
-                          content = f.read()
-                      if "react-native-worklets/plugin" in content:
-                          content = content.replace("'react-native-worklets/plugin'", "'react-native-reanimated/plugin'")
-                          content = content.replace('"react-native-worklets/plugin"', '"react-native-reanimated/plugin"')
-                          with open(b_file, "w", encoding="utf-8") as f:
-                              f.write(content)
-                  except Exception as e:
-                      print(f"Error updating {b_file}:", e)
-
-          # التثبت من وجود index.html
-          if not os.path.exists("index.html"):
-              candidates = [
-                  "src/main.tsx", "src/main.jsx", "src/main.js", "src/main.ts",
-                  "src/App.tsx", "src/App.jsx", "src/App.js", "src/App.ts",
-                  "src/index.tsx", "src/index.jsx", "src/index.js", "src/index.ts",
-                  "App.tsx", "App.jsx", "App.js", "index.js"
-              ]
-              entry = None
-              for c in candidates:
-                  if os.path.exists(c):
-                      entry = c
-                      break
-              if not entry:
-                  entry = "src/App.tsx"
-                  
-              html_content = f"""<!DOCTYPE html>
-          <html lang="en">
-            <head>
-              <meta charset="UTF-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>LinguaMaster</title>
-            </head>
-            <body>
-              <div id="root"></div>
-              <script type="module" src="./{entry}"></script>
-            </body>
-          </html>"""
-              with open("index.html", "w", encoding="utf-8") as f:
-                  f.write(html_content)
           EOF
           python3 prepare.py
 
@@ -131,32 +62,32 @@ jobs:
         with:
           node-version: 20
 
-      # 2. تثبيت الحزم
       - name: Install dependencies
         run: |
           npm config set legacy-peer-deps true
           npm install --legacy-peer-deps --force
-          npm install -D vite @vitejs/plugin-react @expo/cli react-native-web react-dom @expo/metro-runtime react-native-worklets react-native-worklets-core --legacy-peer-deps --force
 
-      # 3. البناء وتصحيح المسارات النسبية للملفات
+      # 2. بناء التطبيق للويب بأسلوب ثابت النسبي
       - name: Build Web Application
         run: |
-          npm run build || npx expo export -p web || npx vite build --base=./
+          npx expo export -p web || npm run build || npx vite build --base=./
 
           if [ ! -d "dist" ]; then
             if [ -d "dist-web" ]; then cp -r dist-web dist; fi
             if [ -d "web-build" ]; then cp -r web-build dist; fi
             if [ -d "build" ]; then cp -r build dist; fi
-            if [ -d "public" ] && [ ! -d "dist" ]; then cp -r public dist; fi
           fi
 
-          # تصحيح مسارات index.html لتصبح نسبية ./ لتعمل داخل WebView
+          # حقن كود طباعة الأخطاء على شاشة الهاتف بدلاً من الشاشة البيضاء
           if [ -f "dist/index.html" ]; then
             sed -i 's/src="\//src="\.\//g' dist/index.html
             sed -i 's/href="\//href="\.\//g' dist/index.html
+            
+            ERR_SCRIPT='<script>window.onerror=function(m,u,l){document.body.innerHTML="<div style=\"color:red;padding:20px;font-size:16px;word-break:break-all;\"><h3>App Crash Error:</h3>"+m+"<br><br><b>File:</b> "+u+"<br><b>Line:</b> "+l+"</div>";};</script>'
+            sed -i "s|<head>|<head>${ERR_SCRIPT}|g" dist/index.html
           fi
 
-      # 4. إعداد Capacitor للأندرويد
+      # 3. تحويل الكود إلى أندرويد عبر Capacitor
       - name: Setup Capacitor for Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
@@ -166,7 +97,6 @@ jobs:
           fi
           npx cap sync android
 
-      # 5. استبعاد مكتبات Kotlin المكررة
       - name: Fix Kotlin Duplicate Classes Conflict
         run: |
           if [ -f "android/build.gradle" ]; then
@@ -179,14 +109,6 @@ jobs:
               }
           }
           EOF
-          fi
-
-      - name: Auto Increment App Version
-        run: |
-          GRADLE_FILE="android/app/build.gradle"
-          if [ -f "$GRADLE_FILE" ]; then
-            sed -i 's/versionCode [0-9]*/versionCode ${{ github.run_number }}/g' $GRADLE_FILE
-            sed -i 's/versionName "[^"]*"/versionName "1.0.${{ github.run_number }}"/g' $GRADLE_FILE
           fi
 
       - name: Setup Java JDK
