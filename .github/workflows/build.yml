@@ -13,15 +13,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Unzip project files
+      # فك الضغط التلقائي الذكي للبحث عن الملفات أينما كانت
+      - name: Unzip project files smartly
         run: |
+          mkdir -p extracted
           unzip -o *.zip -d extracted/
-          if [ -f extracted/package.json ]; then
-            cp -r extracted/* . 2>/dev/null || true
-            cp -r extracted/.* . 2>/dev/null || true
-          else
-            cp -r extracted/*/* . 2>/dev/null || true
-            cp -r extracted/*/.??* . 2>/dev/null || true
+          
+          PKG_PATH=$(find extracted -name "package.json" | head -n 1)
+          if [ -n "$PKG_PATH" ]; then
+            PKG_DIR=$(dirname "$PKG_PATH")
+            cp -r $PKG_DIR/* . 2>/dev/null || true
+            cp -r $PKG_DIR/.* . 2>/dev/null || true
           fi
           rm -rf extracted
 
@@ -33,8 +35,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # بناء التطبيق مباشرة عبر Vite مع تجاوز أي نقص في package.json
       - name: Build Web Application
-        run: npm run build
+        run: |
+          if npm run | grep -q " build"; then
+            npm run build
+          else
+            npx vite build || npx tsc && npx vite build
+          fi
 
       - name: Setup Capacitor for Android
         run: |
