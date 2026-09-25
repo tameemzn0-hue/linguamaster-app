@@ -140,7 +140,7 @@ jobs:
           npm install --legacy-peer-deps --force
           npm install -D vite @vitejs/plugin-react @expo/cli react-native-web react-dom @expo/metro-runtime react-native-worklets react-native-worklets-core --legacy-peer-deps --force
 
-      # 3. تنفيذ أمر البناء المصمّم تلقائياً
+      # 3. تنفيذ أمر البناء
       - name: Build Web Application
         run: |
           npm run build || npx expo export -p web || npx vite build
@@ -152,7 +152,7 @@ jobs:
             if [ -d "public" ] && [ ! -d "dist" ]; then cp -r public dist; fi
           fi
 
-      # 4. تحويل تطبيق الويب إلى APK عبر Capacitor
+      # 4. إعداد Capacitor وتحديث بيئة Java إلى الإصدار 21
       - name: Setup Capacitor for Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps --force
@@ -173,10 +173,10 @@ jobs:
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
-      - name: Fix Gradle Wrapper Version (Update to 8.9)
+      - name: Fix Gradle Wrapper Version
         run: |
           cd android
           gradle wrapper --gradle-version 8.9 --distribution-type bin
